@@ -1,0 +1,27 @@
+{
+  "name": "telebot.js",
+  "version": "1.0.0",
+  "description": "A framework that wrappers TelegramBot API into an business estructure.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ropbla9/telebot.js.git"
+  },
+  "keywords": [
+    "telegram",
+    "telegrambot",
+    "bot",
+    "botapi",
+    "telegram",
+    "api"
+  ],
+  "author": "ropSoft",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ropbla9/telebot.js/issues"
+  },
+  "homepage": "https://github.com/ropbla9/telebot.js#readme"
+}
