@@ -1,5 +1,7 @@
 const path = require('path')
 const events = require('events');
+const axios = require('axios')
+const Chance = require('chance')
 const TelegramBot = require('node-telegram-bot-api');
       
 const Chat = require('./Chat.js');
@@ -11,6 +13,11 @@ function Telebot (options) {
     if (!options.name) {
         cerr('  Fail at create Telebot inst')
         throw new Error('No .name was set')
+    }
+
+    if (!options.naname) {
+        cerr('  Fail at create Telebot inst')
+        throw new Error('No .naname was set')
     }
     
     if (!options.token) {
@@ -28,22 +35,48 @@ function Telebot (options) {
 
     this.$id = util.genHash();
     this.$name = options.name;
+    this.$naname = options.naname;
     this.$token = options.token;
+    this.$pixmanager = options.pixmanager;
+    this.$debug = options.debug;
 
     this.$tasks  = {};
     this.$ttchats = [];
     this.$ttbotSlaves = {};
     this.$scopeHandlers = {};
+    this.$delegacyHandler = Function;
 
     this.$native = this.$n = new TelegramBot(this.$token, options.noptions);    
     this.$emitter = new events.EventEmitter();
+    this.$axios = makeAxiosBotInst();
 
     this.$lowdb = options.lowdb
     this.$admins = options.admins.split(',')
-    
+
     // public 
     this.on = this.$emitter.on;
     this.emit = this.$emitter.emit;
+
+    // me still undefined
+    // will be defined on start()
+    this.$me = this.$n.getMe();
+ 
+    // log shorts
+    this.clog = () => {};
+    this.cerr = () => {};
+    this.cinf = () => {};
+
+    if (!this.$debug) {
+        this.clog = console.log;
+        this.cerr = console.error;
+        this.cinf = console.info;
+    }
+
+    // meta props definitions
+    this.meta = Object.create(null);
+
+    // defines this.$emitter prototype as this
+    Object.setPrototypeOf(this.$emitter, this);
 
     if (!this.$lowdb.data[this.$name + '.chats']) {
          this.$lowdb.data[this.$name + '.chats'] = []; 
@@ -54,6 +87,43 @@ function Telebot (options) {
          this.$lowdb.data[this.$name + '.checkings'] = [];
          this.$lowdb.write()
     }
+
+    // * Telebot() HELPERS * --------------------------;
+    function makeAxiosBotInst () {
+        
+        const reqopts = options.request;
+        let axiosinst;
+
+        if (reqopts) {
+            axiosinst = axios.create({});
+        }
+
+        axiosinst = axios.create({
+            ...reqopts
+        })
+
+        return axiosinst;
+    }
+}
+
+Telebot.prototype.getcrew = function () {
+    
+    let h = [];
+
+    for (let key in this.$ttbotSlaves) {
+        let inst = this.$ttbotSlaves[key]
+        h.push(inst.$naname)
+    }
+    
+    return h;
+}
+
+Telebot.prototype.myself = async function () {
+    return await this.$n.getMe();
+}
+
+Telebot.prototype.take = function (slaveinstname) {
+    return this.$ttbotSlaves[slaveinstname];
 }
 
 Telebot.prototype.push = function (ttchat) {
@@ -94,6 +164,13 @@ Telebot.prototype.sendone = async function (chatid, text) {
     await this.$n.sendMessage(chatid, text)
 }
 
+Telebot.prototype.sendany = async function (chatid, textarr) {
+    const chance = new Chance(),
+          reply = chance.pickone(textarr);
+
+    await this.$n.sendMessage(chatid, reply)
+}
+
 Telebot.prototype.sendonce = async function (chatid, texts) {
 
     if (!Array.isArray(texts)) {
@@ -118,6 +195,21 @@ Telebot.prototype.learn = function (keyOrObj, skillMtd) {
     }
 }
 
+Telebot.prototype.delegacy = function (cb) {
+    this.$delegacyHandler = async function (ttbotinst, task, pload) {
+        await cb.call(this, ttbotinst, task, pload)
+    }
+}
+
+Telebot.prototype.delegate = async function (
+                    ttbotinstName, 
+                        task = null, 
+                            pload = null) {
+    
+        let ttbotTartget = this.$ttbotSlaves[ttbotinstName];
+        await ttbotTartget.$delegacyHandler(ttbotinstName, task, pload)
+}
+
 Telebot.prototype.meeting = function (cb) {
     this.$meetingHandler = async ttchat => {
         await cb.call(this, ttchat);
@@ -131,6 +223,7 @@ Telebot.prototype.donce = function (cb) {
 }
 
 Telebot.prototype.isadmin = function (ttchatid) {
+    
     let found = this.$admins.find(admid => {
         return Number(admid) === ttchatid;
     })
@@ -160,8 +253,8 @@ Telebot.prototype.upset = async function (ttchatid, upsets, key, opValue) {
     })
 
     if (!tchatdata) {
-        clog('  No ttchatdata set yet persistent json db.')
-        clog('  ...adding new new ttchat data to json db.')
+        this.clog('  No ttchatdata set yet persistent json db.')
+        this.clog('  ...adding new new ttchat data to json db.')
         
         this.$lowdb.data[this.$name + '.chats'].push({
             id: ttchatid,
@@ -172,12 +265,13 @@ Telebot.prototype.upset = async function (ttchatid, upsets, key, opValue) {
         return;
     }
 
-    clog('  Updating persistent json db.')
+    this.clog('  Updating persistent json db.')
 
     let updatedchats;
 
     // is operator
     if (typeof upsets === 'string' && upsets.includes('$')) {
+        
         updatedchats = this.$lowdb.data[this.$name + '.chats'].map(_ttchatdata => {
             
             let found = _ttchatdata.id === ttchatid,
@@ -202,6 +296,7 @@ Telebot.prototype.upset = async function (ttchatid, upsets, key, opValue) {
         })
 
     } else { // is object to merge
+        
         updatedchats = this.$lowdb.data[this.$name + '.chats'].map(_ttchatdata => {
             
             let found = _ttchatdata.id === ttchatid;
@@ -235,12 +330,12 @@ Telebot.prototype.task = function (ops, cb) {
         cinf(`      - task ${ctx.name} says:`, what)
     }
 
-    clog(`  ...initiating task: ${ctx.name} within ${ctx.timeout}.`)
+    this.clog(`  ...initiating task: ${ctx.name} within ${ctx.timeout}.`)
 
     setTimeout(() => {
 
-        clog(`  ...task: ${ctx.name} running at interval: ${ctx.interval}.`)
-        
+        this.clog(`  ...task: ${ctx.name} running at interval: ${ctx.interval}.`)
+
         this.$tasks[ctx.name] = setInterval(() => {
             cb.call({ ...this, ...ctx })
         }, ctx.interval)
@@ -262,8 +357,12 @@ Telebot.prototype.cooworker = function (slvname) {
     return this.$ttbotSlaves[slvname];
 }
 
-Telebot.prototype.sendimg = async function (ttchatid, _path) {
-    await this.$n.sendPhoto(ttchatid, _path);
+Telebot.prototype.sendimg = async function (ttchatid, _pathOrFileId) {
+    await this.$n.sendPhoto(ttchatid, _pathOrFileId);
+}
+
+Telebot.prototype.sendocument = async function (ttchatid, teleDocObj) {
+    await this.$n.sendPhoto(ttchatid, teleDocObj.file_id);
 }
 
 Telebot.prototype.scopeify = async function () {
@@ -278,11 +377,49 @@ Telebot.prototype.incoming = async function (_cb) {
     this.$incomingHandler = _cb;
 }
 
-Telebot.prototype.start = async function () {
+Telebot.prototype.forward = async function (ttchatid, nmsgid, targetinstname) {
 
-    if (Object.keys(this.$ttbotSlaves).length >= 1) {
-        clog('\n    → ttbot:', this.$name + ` has slave instances.`)
-        clog('    → starting them all before itself.')
+    const targetinst = this.take(targetinstname),
+          targetdata = await targetinst.$n.getMe(),
+          targetinstID = targetdata.id; 
+
+    this.clog('  targetinstname >>>', targetinstname)
+    this.clog('  targetinst >>>', targetinst)
+    this.clog('  targetdata >>>', targetdata)
+    this.clog('  msgid >>>', nmsgid)
+
+    await this.$n.forwardMessage(targetinstID, ttchatid, nmsgid)
+}
+
+Telebot.prototype.request = async function (reqopts = {}) {
+    return await this.$axios({
+        ...reqopts
+    })
+}
+
+Telebot.prototype.debug = async function (propmap, file, line) {
+    
+    if (this.$debug) {
+        clog('\n\n')
+        clog('  🐞 Debugging at:', file + ':' + line, '\n')
+        
+        for (let key in propmap) {
+            clog(`  → ${key}:`, propmap[key])
+        }
+
+        clog('  🐞 Debugging end * ----------- *')
+        clog('\n\n')
+    }
+}
+
+Telebot.prototype.start = async function () {
+    
+    const haslaves = Object.keys(this.$ttbotSlaves).length >= 1;
+
+    if (haslaves) {
+        
+        this.clog('\n    → ttbot:', this.$name + ` has slave instances.`)
+        this.clog('    → starting them all before itself.')
         
         for (let key in this.$ttbotSlaves) {
             let slav = this.$ttbotSlaves[key]
@@ -290,7 +427,7 @@ Telebot.prototype.start = async function () {
         }
     }
 
-    clog('\n    * Starting instance:', this.$name, '🤖')
+    this.clog('\n    * Starting instance:', this.$name, '🤖')
 
     let newttinst;
 
@@ -298,9 +435,11 @@ Telebot.prototype.start = async function () {
         this.$incomingHandler(ttchat, text, nmsg)
     })
 
+    this.$me = await this.$n.getMe();
+
     const handler = async msg => {
 
-        clog('\n ...running $start handler()')
+        this.clog('\n ...running $start handler()')
 
         let existingttchat = await this.$ttchats.find(ttchat => {
             return ttchat.id === msg.chat.id;
@@ -308,12 +447,18 @@ Telebot.prototype.start = async function () {
 
         // if new ttinst already exist in db
         if (existingttchat) {
-            clog('  ...chat already an Chat inst (ttchat) on this.$tcoll coll.')
-            clog(' \n\n\n existingttchat', existingttchat, '\n\n\n')
+            
+            this.clog('  ...chat already an Chat inst (ttchat) on this.$tcoll coll.')
+            this.clog(' \n\n\n existingttchat', existingttchat, '\n\n\n')
+            
             this.emit('#incoming', existingttchat, msg.text, msg)
+        
         } else {
-            clog('  Adding new Chat instance to this.$tcoll')
+
+            this.clog('  Adding new Chat instance to this.$tcoll')
+            
             newttinst = new Chat(msg);
+            
             this.$ttchats.push(newttinst)
             this.emit('#incoming', newttinst, msg.text, msg)
         }
@@ -322,6 +467,7 @@ Telebot.prototype.start = async function () {
     try {
         
         this.$n.once('message', async (msg) => {
+           
             newttinst = new Chat(msg);
             
             if (msg.text === '/start' && this.$meetingHandler) {
@@ -339,6 +485,7 @@ Telebot.prototype.start = async function () {
         })
         
         cinf(   '\nNew Telebot instance: \n')
+        
         // custom bot props
         clog('   $id:',      this.$id)
         clog('   $token:',   this.$token)
